@@ -1,0 +1,332 @@
+[
+  {
+    "id": "C11",
+    "scenario_id": "C11",
+    "title": "Scrollbar：双轴尺寸、位移与自动更新（Python 核心逻辑改编）",
+    "source": "参考 element-plus/element-plus PR #130；原语言 Vue3/TypeScript；Python 核心逻辑改编；https://github.com/element-plus/element-plus/pull/130",
+    "description": "依据飞书《基础模型评测》参考题改编。保留 thumb 百分比尺寸、translate 双轴样式及 resize 状态考点；不运行 Vue DOM、包入口或浏览器测试。仅验证下述独立 Python 接口，不等同于原仓库隐藏测试或端到端评测。",
+    "system_prompt": "按公开接口完成 solution.py，仅使用 Python 3.11 标准库。只输出一个 python 围栏块，块内为完整 solution.py，不输出解释。",
+    "requirements": "实现 geometry(viewport, content, offset=0, horizontal=False) -> dict；\nviewport/content 为非负有限 int/float（不接受 bool），offset 为有限 int/float，horizontal 必须 bool。\noverflow 时 size=100*viewport/content，move=100*clamp(offset,0,content-viewport)/viewport；\nviewport=0 或 content<=viewport 时 size=move=0。返回且仅返回 size、move、style；\nstyle 垂直为 {'height':f'{size:g}%', 'transform':f'translateY({move:g}%)',\n'webkitTransform':同transform}，水平用 width/translateX。无 overflow 仍返回零样式。\n实现 Scrollbar(viewport, content, horizontal=False)，offset 初始0，\nscroll(offset) 更新 offset 并返回 geometry，update(viewport,content) 更新尺寸、\n保留并钳制旧 offset 并返回 geometry；snapshot() 返回当前独立 dict。\n对象公开属性 viewport/content/offset/horizontal；offset 始终钳制在[0,max(0,content-viewport)]，\nviewport=0 时 offset=0。非法 scroll/update 输入不得改变原状态。\n禁止跨实例共享状态或复用可变返回值。构造器/三个方法参数名保持，snapshot 无额外参数。\n只修改 solution.py。禁止 eval/exec；任一函数至多80行（含空行），作为可维护性代理指标。所有输入错误统一抛 ValueError，消息不限。",
+    "public_files": {
+      "solution.py": "def geometry(viewport, content, offset=0, horizontal=False):\n    raise NotImplementedError\n\nclass Scrollbar:\n    def __init__(self, viewport, content, horizontal=False):\n        raise NotImplementedError\n    def scroll(self, offset):\n        raise NotImplementedError\n    def update(self, viewport, content):\n        raise NotImplementedError\n    def snapshot(self):\n        raise NotImplementedError\n"
+    },
+    "reference_files": {
+      "solution.py": "import math\n\ndef _number(value, nonnegative=False):\n    if type(value) not in (int, float) or not math.isfinite(value):\n        raise ValueError('finite number required')\n    if nonnegative and value < 0:\n        raise ValueError('nonnegative required')\n\ndef geometry(viewport, content, offset=0, horizontal=False):\n    _number(viewport, True)\n    _number(content, True)\n    _number(offset)\n    if type(horizontal) is not bool:\n        raise ValueError('bool required')\n    size = move = 0\n    if viewport > 0 and content > viewport:\n        size = 100 * viewport / content\n        move = 100 * min(max(offset, 0), content - viewport) / viewport\n    axis, dimension = ('X', 'width') if horizontal else ('Y', 'height')\n    transform = f'translate{axis}({move:g}%)'\n    return {'size': size, 'move': move, 'style': {\n        dimension: f'{size:g}%', 'transform': transform, 'webkitTransform': transform}}\n\nclass Scrollbar:\n    def __init__(self, viewport, content, horizontal=False):\n        geometry(viewport, content, 0, horizontal)\n        self.viewport, self.content, self.horizontal = viewport, content, horizontal\n        self.offset = 0\n\n    def scroll(self, offset):\n        geometry(self.viewport, self.content, offset, self.horizontal)\n        self.offset = min(max(offset, 0), max(0, self.content - self.viewport)) if self.viewport else 0\n        return self.snapshot()\n\n    def update(self, viewport, content):\n        geometry(viewport, content, self.offset, self.horizontal)\n        offset = min(self.offset, max(0, content - viewport)) if viewport else 0\n        self.viewport, self.content, self.offset = viewport, content, offset\n        return self.snapshot()\n\n    def snapshot(self):\n        return geometry(self.viewport, self.content, self.offset, self.horizontal)\n"
+    },
+    "test_files": {
+      "checks.py": "import ast\nimport copy\nimport functools\nimport inspect\nimport math\nimport random\nimport sys\nimport unittest\nimport warnings\nfrom datetime import datetime, timezone, timedelta\nimport solution\n\ndef _case(fn):\n    @functools.wraps(fn)\n    def run():\n        try:\n            fn()\n        except Exception as exc:\n            raise AssertionError(str(exc)) from exc\n    return run\n\n@_case\ndef check_geometry():\n    for horizontal, key, axis in [(False,'height','Y'), (True,'width','X')]:\n        for offset, move in [(0,0),(100,50),(300,150),(999,150),(-1,0)]:\n            result = solution.geometry(200,500,offset,horizontal)\n            assert result == {'size':40, 'move':move, 'style':{\n                key:'40%', 'transform':f'translate{axis}({move}%)',\n                'webkitTransform':f'translate{axis}({move}%)'}}\n    s = solution.Scrollbar(200,500)\n    assert s.scroll(100)['move'] == 50\n    assert s.update(100,500)['move'] == 100\n    assert s.update(100,120)['move'] == 20 and s.offset == 20\n    assert s.update(600,120)['size'] == 0 and s.offset == 0\n\n@_case\ndef check_boundaries():\n    for v,c in [(0,500),(0,0),(200,200),(200,100)]:\n        assert solution.geometry(v,c,10)['size'] == 0\n        assert solution.geometry(v,c,10)['move'] == 0\n    assert math.isclose(solution.geometry(3,7,2)['move'],200/3)\n    for args in [(-1,3),(3,-1),(True,3),(3,'9'),(float('nan'),3),(3,float('inf'))]:\n        with unittest.TestCase().assertRaises(ValueError):\n            solution.geometry(*args)\n    for offset in [True,'1',float('nan'),float('inf')]:\n        with unittest.TestCase().assertRaises(ValueError):\n            solution.geometry(2,5,offset)\n    with unittest.TestCase().assertRaises(ValueError):\n        solution.geometry(2,5,horizontal=1)\n\n@_case\ndef check_state_integrity():\n    a,b = solution.Scrollbar(200,500), solution.Scrollbar(200,500)\n    a.scroll(100)\n    snapshot = a.snapshot()\n    snapshot['style']['height'] = 'corrupt'\n    snapshot['move'] = -99\n    assert a.snapshot()['style']['height'] == '40%'\n    assert a.snapshot()['move'] == 50 and b.offset == 0\n    for op in [lambda:a.scroll('x'), lambda:a.update(300,-1)]:\n        before = (a.viewport,a.content,a.offset,a.snapshot())\n        with unittest.TestCase().assertRaises(ValueError):\n            op()\n        assert (a.viewport,a.content,a.offset,a.snapshot()) == before\n\n@_case\ndef check_contract():\n    p = inspect.signature(solution.geometry).parameters\n    assert list(p) == ['viewport','content','offset','horizontal']\n    assert p['offset'].default == 0 and p['horizontal'].default is False\n    assert list(inspect.signature(solution.Scrollbar).parameters) == ['viewport','content','horizontal']\n    for method,names in [('scroll',['self','offset']),('update',['self','viewport','content']),('snapshot',['self'])]:\n        assert list(inspect.signature(getattr(solution.Scrollbar,method)).parameters) == names\n    result = solution.Scrollbar(200,500,horizontal=True).scroll(offset=100)\n    assert set(result) == {'size','move','style'} and 'width' in result['style']\n\n@_case\ndef check_maintainability():\n    tree = ast.parse(inspect.getsource(solution))\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Call):\n            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, 'attr', '')\n            assert name not in {'eval', 'exec'}\n        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):\n            assert node.end_lineno - node.lineno + 1 <= 80\n"
+    },
+    "negative_files": {
+      "wrong_move_denominator": {
+        "solution.py": "import math\n\ndef _number(value, nonnegative=False):\n    if type(value) not in (int, float) or not math.isfinite(value):\n        raise ValueError('finite number required')\n    if nonnegative and value < 0:\n        raise ValueError('nonnegative required')\n\ndef geometry(viewport, content, offset=0, horizontal=False):\n    _number(viewport, True)\n    _number(content, True)\n    _number(offset)\n    if type(horizontal) is not bool:\n        raise ValueError('bool required')\n    size = move = 0\n    if viewport > 0 and content > viewport:\n        size = 100 * viewport / content\n        move = 100 * min(max(offset, 0), content - viewport) / content\n    axis, dimension = ('X', 'width') if horizontal else ('Y', 'height')\n    transform = f'translate{axis}({move:g}%)'\n    return {'size': size, 'move': move, 'style': {\n        dimension: f'{size:g}%', 'transform': transform, 'webkitTransform': transform}}\n\nclass Scrollbar:\n    def __init__(self, viewport, content, horizontal=False):\n        geometry(viewport, content, 0, horizontal)\n        self.viewport, self.content, self.horizontal = viewport, content, horizontal\n        self.offset = 0\n\n    def scroll(self, offset):\n        geometry(self.viewport, self.content, offset, self.horizontal)\n        self.offset = min(max(offset, 0), max(0, self.content - self.viewport)) if self.viewport else 0\n        return self.snapshot()\n\n    def update(self, viewport, content):\n        geometry(viewport, content, self.offset, self.horizontal)\n        offset = min(self.offset, max(0, content - viewport)) if viewport else 0\n        self.viewport, self.content, self.offset = viewport, content, offset\n        return self.snapshot()\n\n    def snapshot(self):\n        return geometry(self.viewport, self.content, self.offset, self.horizontal)\n"
+      },
+      "no_resize_clamp": {
+        "solution.py": "import math\n\ndef _number(value, nonnegative=False):\n    if type(value) not in (int, float) or not math.isfinite(value):\n        raise ValueError('finite number required')\n    if nonnegative and value < 0:\n        raise ValueError('nonnegative required')\n\ndef geometry(viewport, content, offset=0, horizontal=False):\n    _number(viewport, True)\n    _number(content, True)\n    _number(offset)\n    if type(horizontal) is not bool:\n        raise ValueError('bool required')\n    size = move = 0\n    if viewport > 0 and content > viewport:\n        size = 100 * viewport / content\n        move = 100 * min(max(offset, 0), content - viewport) / viewport\n    axis, dimension = ('X', 'width') if horizontal else ('Y', 'height')\n    transform = f'translate{axis}({move:g}%)'\n    return {'size': size, 'move': move, 'style': {\n        dimension: f'{size:g}%', 'transform': transform, 'webkitTransform': transform}}\n\nclass Scrollbar:\n    def __init__(self, viewport, content, horizontal=False):\n        geometry(viewport, content, 0, horizontal)\n        self.viewport, self.content, self.horizontal = viewport, content, horizontal\n        self.offset = 0\n\n    def scroll(self, offset):\n        geometry(self.viewport, self.content, offset, self.horizontal)\n        self.offset = min(max(offset, 0), max(0, self.content - self.viewport)) if self.viewport else 0\n        return self.snapshot()\n\n    def update(self, viewport, content):\n        geometry(viewport, content, self.offset, self.horizontal)\n        offset = self.offset\n        self.viewport, self.content, self.offset = viewport, content, offset\n        return self.snapshot()\n\n    def snapshot(self):\n        return geometry(self.viewport, self.content, self.offset, self.horizontal)\n"
+      }
+    },
+    "rubric": [
+      {
+        "check": "check_geometry",
+        "dimension": "functionality",
+        "description": "双轴原题几何样例与 resize 钳制",
+        "critical": false
+      },
+      {
+        "check": "check_boundaries",
+        "dimension": "robustness",
+        "description": "零尺寸、无溢出及非法输入",
+        "critical": false
+      },
+      {
+        "check": "check_state_integrity",
+        "dimension": "security",
+        "description": "返回值独立、实例隔离、失败不写状态",
+        "critical": true
+      },
+      {
+        "check": "check_contract",
+        "dimension": "compliance",
+        "description": "公开签名、样式键及 webkitTransform 兼容",
+        "critical": false
+      },
+      {
+        "check": "check_maintainability",
+        "dimension": "maintainability",
+        "description": "无 eval/exec，函数至多80行",
+        "critical": false
+      }
+    ],
+    "output_format": {
+      "kind": "files",
+      "allowed_paths": [
+        "solution.py"
+      ],
+      "instructions": "只输出一个 ```python 围栏块，内容为完整 solution.py。"
+    },
+    "status": "draft"
+  },
+  {
+    "id": "C12",
+    "scenario_id": "C12",
+    "title": "Faker：跨平台亚秒时间与共享随机源（Python 核心逻辑改编）",
+    "source": "参考 joke2k/faker PR #1946；原语言 Python；Python 核心逻辑改编；https://github.com/joke2k/faker/pull/1946",
+    "description": "依据飞书《基础模型评测》参考题改编。保留 Windows 整秒与其他平台亚秒精度、共享生成路径考点；不安装完整 Faker provider。仅验证下述独立 Python 接口，不等同于原仓库隐藏测试或端到端评测。",
+    "system_prompt": "按公开接口完成 solution.py，仅使用 Python 3.11 标准库。只输出一个 python 围栏块，块内为完整 solution.py，不输出解释。",
+    "requirements": "实现 random_timestamp(start,end,rng,platform='linux')；\nstart/end 为有限非负 int/float（非bool），start<=end；rng 有 randint/uniform 方法。\nplatform 为非空字符串，仅 'win32' 被视为 Windows。Windows 从闭区间\n[ceil(start),floor(end)] 调 rng.randint 一次，返回 int；没有可用整数则 ValueError且不调rng。\n其他平台调 rng.uniform(start,end) 一次，返回 float，保留亚秒部分。\n实现 unix_time(start,end,rng,platform='linux')，共享 random_timestamp 行为；\ndate_time_between(start,end,rng,platform='linux',tz=timezone.utc) 返回\ndatetime.fromtimestamp(timestamp,tz)，tz 是 datetime.tzinfo 实例且不接受 None；\niso8601(start,end,rng,platform='linux') 返回 UTC 时间字符串，不带时区后缀，\n格式 YYYY-MM-DDTHH:MM:SS，Windows 长度19；其他平台追加 .ffffff 长度26，即使微秒为0也保留。\n适用 timestamp 范围[0,4102444800]；超范围 ValueError。\n失败（含非法 tz）必须在调用rng前验证。仅推进注入rng，不修改全局 random 状态。\n全部四个接口保留参数名及默认值；支持 keyword 调用，不使用系统时钟。\n只修改 solution.py。禁止 eval/exec；任一函数至多80行（含空行），作为可维护性代理指标。所有输入错误统一抛 ValueError，消息不限。",
+    "public_files": {
+      "solution.py": "from datetime import timezone\ndef random_timestamp(start,end,rng,platform='linux'):\n    raise NotImplementedError\ndef unix_time(start,end,rng,platform='linux'):\n    raise NotImplementedError\ndef date_time_between(start,end,rng,platform='linux',tz=timezone.utc):\n    raise NotImplementedError\ndef iso8601(start,end,rng,platform='linux'):\n    raise NotImplementedError\n"
+    },
+    "reference_files": {
+      "solution.py": "import math\nfrom datetime import datetime, timezone, tzinfo\n\ndef random_timestamp(start,end,rng,platform='linux'):\n    for value in (start,end):\n        if type(value) not in (int,float) or not math.isfinite(value) or not 0 <= value <= 4102444800:\n            raise ValueError('timestamp invalid')\n    if start > end or not isinstance(platform,str) or not platform:\n        raise ValueError('interval or platform invalid')\n    if platform == 'win32':\n        low, high = math.ceil(start), math.floor(end)\n        if low > high:\n            raise ValueError('no integer timestamp')\n        return int(rng.randint(low,high))\n    return float(rng.uniform(start,end))\n\ndef unix_time(start,end,rng,platform='linux'):\n    return random_timestamp(start,end,rng,platform)\n\ndef date_time_between(start,end,rng,platform='linux',tz=timezone.utc):\n    if not isinstance(tz,tzinfo):\n        raise ValueError('tzinfo required')\n    return datetime.fromtimestamp(random_timestamp(start,end,rng,platform),tz)\n\ndef iso8601(start,end,rng,platform='linux'):\n    value = date_time_between(start,end,rng,platform)\n    return value.isoformat(timespec='seconds' if platform == 'win32' else 'microseconds')[:-6]\n"
+    },
+    "test_files": {
+      "checks.py": "import ast\nimport copy\nimport functools\nimport inspect\nimport math\nimport random\nimport sys\nimport unittest\nimport warnings\nfrom datetime import datetime, timezone, timedelta\nimport solution\n\ndef _case(fn):\n    @functools.wraps(fn)\n    def run():\n        try:\n            fn()\n        except Exception as exc:\n            raise AssertionError(str(exc)) from exc\n    return run\n\nclass RNG:\n    def __init__(self): self.calls = []\n    def randint(self,a,b):\n        self.calls.append(('randint',a,b))\n        return a\n    def uniform(self,a,b):\n        self.calls.append(('uniform',a,b))\n        return a+(b-a)/4\n\n@_case\ndef check_precision():\n    for platform in ['linux','darwin','win32']:\n        rng = RNG()\n        value = solution.unix_time(100,101,rng,platform)\n        assert type(value) is (int if platform=='win32' else float)\n        assert value == (100 if platform=='win32' else 100.25)\n        assert rng.calls == [('randint' if platform=='win32' else 'uniform',100,101)]\n        rng = RNG()\n        text = solution.iso8601(100,101,rng,platform)\n        assert text == ('1970-01-01T00:01:40' if platform=='win32' else '1970-01-01T00:01:40.250000')\n        assert len(rng.calls) == 1\n    assert solution.iso8601(0,0,RNG()) == '1970-01-01T00:00:00.000000'\n    tz = timezone(timedelta(hours=8))\n    assert solution.date_time_between(100,101,RNG(),tz=tz) == datetime(1970,1,1,8,1,40,250000,tz)\n\n@_case\ndef check_intervals():\n    for start,end in [(2,1),(-1,1),(0,float('inf')),(float('nan'),1),(True,2),('1',2),(0,4102444801)]:\n        rng = RNG()\n        with unittest.TestCase().assertRaises(ValueError):\n            solution.random_timestamp(start,end,rng)\n        assert rng.calls == []\n    rng = RNG()\n    with unittest.TestCase().assertRaises(ValueError):\n        solution.random_timestamp(1.1,1.9,rng,'win32')\n    assert rng.calls == []\n    assert solution.random_timestamp(1.1,2.1,rng,'win32') == 2\n    assert rng.calls == [('randint',2,2)]\n    for platform in ['',None,1]:\n        rng = RNG()\n        with unittest.TestCase().assertRaises(ValueError):\n            solution.unix_time(0,1,rng,platform)\n        assert not rng.calls\n\n@_case\ndef check_rng_integrity():\n    before = random.getstate()\n    for fn in [solution.random_timestamp,solution.unix_time,solution.iso8601,solution.date_time_between]:\n        a,b = random.Random(123),random.Random(123)\n        assert fn(100,200,a) == fn(100,200,b)\n    assert random.getstate() == before\n    for tz in [None,'UTC',8]:\n        rng = RNG()\n        with unittest.TestCase().assertRaises(ValueError):\n            solution.date_time_between(0,1,rng,tz=tz)\n        assert not rng.calls\n\n@_case\ndef check_contract():\n    for name in ['random_timestamp','unix_time','iso8601','date_time_between']:\n        p = inspect.signature(getattr(solution,name)).parameters\n        assert list(p) == ['start','end','rng','platform'] + (['tz'] if name=='date_time_between' else [])\n        assert p['platform'].default == 'linux'\n    assert inspect.signature(solution.date_time_between).parameters['tz'].default == timezone.utc\n    assert solution.unix_time(start=100,end=101,rng=RNG(),platform='win32') == 100\n    assert len(solution.iso8601(100,101,RNG(),'win32')) == 19\n    assert len(solution.iso8601(100,101,RNG(),'darwin')) == 26\n\n@_case\ndef check_maintainability():\n    tree = ast.parse(inspect.getsource(solution))\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Call):\n            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, 'attr', '')\n            assert name not in {'eval', 'exec'}\n        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):\n            assert node.end_lineno - node.lineno + 1 <= 80\n"
+    },
+    "negative_files": {
+      "truncate_subseconds": {
+        "solution.py": "import math\nfrom datetime import datetime, timezone, tzinfo\n\ndef random_timestamp(start,end,rng,platform='linux'):\n    for value in (start,end):\n        if type(value) not in (int,float) or not math.isfinite(value) or not 0 <= value <= 4102444800:\n            raise ValueError('timestamp invalid')\n    if start > end or not isinstance(platform,str) or not platform:\n        raise ValueError('interval or platform invalid')\n    if platform == 'win32':\n        low, high = math.ceil(start), math.floor(end)\n        if low > high:\n            raise ValueError('no integer timestamp')\n        return int(rng.randint(low,high))\n    return float(int(rng.uniform(start,end)))\n\ndef unix_time(start,end,rng,platform='linux'):\n    return random_timestamp(start,end,rng,platform)\n\ndef date_time_between(start,end,rng,platform='linux',tz=timezone.utc):\n    if not isinstance(tz,tzinfo):\n        raise ValueError('tzinfo required')\n    return datetime.fromtimestamp(random_timestamp(start,end,rng,platform),tz)\n\ndef iso8601(start,end,rng,platform='linux'):\n    value = date_time_between(start,end,rng,platform)\n    return value.isoformat(timespec='seconds' if platform == 'win32' else 'microseconds')[:-6]\n"
+      },
+      "windows_uniform": {
+        "solution.py": "import math\nfrom datetime import datetime, timezone, tzinfo\n\ndef random_timestamp(start,end,rng,platform='linux'):\n    for value in (start,end):\n        if type(value) not in (int,float) or not math.isfinite(value) or not 0 <= value <= 4102444800:\n            raise ValueError('timestamp invalid')\n    if start > end or not isinstance(platform,str) or not platform:\n        raise ValueError('interval or platform invalid')\n    if platform == 'win32':\n        low, high = math.ceil(start), math.floor(end)\n        if low > high:\n            raise ValueError('no integer timestamp')\n        return float(rng.uniform(low,high))\n    return float(rng.uniform(start,end))\n\ndef unix_time(start,end,rng,platform='linux'):\n    return random_timestamp(start,end,rng,platform)\n\ndef date_time_between(start,end,rng,platform='linux',tz=timezone.utc):\n    if not isinstance(tz,tzinfo):\n        raise ValueError('tzinfo required')\n    return datetime.fromtimestamp(random_timestamp(start,end,rng,platform),tz)\n\ndef iso8601(start,end,rng,platform='linux'):\n    value = date_time_between(start,end,rng,platform)\n    return value.isoformat(timespec='seconds' if platform == 'win32' else 'microseconds')[:-6]\n"
+      }
+    },
+    "rubric": [
+      {
+        "check": "check_precision",
+        "dimension": "functionality",
+        "description": "平台精度、共享随机路径与时区转换",
+        "critical": false
+      },
+      {
+        "check": "check_intervals",
+        "dimension": "robustness",
+        "description": "区间、类型及整数窗口",
+        "critical": false
+      },
+      {
+        "check": "check_rng_integrity",
+        "dimension": "security",
+        "description": "注入随机源复现、全局状态不变、失败不消耗随机源",
+        "critical": true
+      },
+      {
+        "check": "check_contract",
+        "dimension": "compliance",
+        "description": "签名与 Windows/non-Windows 字符串兼容",
+        "critical": false
+      },
+      {
+        "check": "check_maintainability",
+        "dimension": "maintainability",
+        "description": "无 eval/exec，函数至多80行",
+        "critical": false
+      }
+    ],
+    "output_format": {
+      "kind": "files",
+      "allowed_paths": [
+        "solution.py"
+      ],
+      "instructions": "只输出一个 ```python 围栏块，内容为完整 solution.py。"
+    },
+    "status": "draft"
+  },
+  {
+    "id": "C13",
+    "scenario_id": "C13",
+    "title": "Prometheus：32位 k 与 int64 histogram（Python 核心逻辑改编）",
+    "source": "参考 prometheus/prometheus PR #15548；原语言 Go；Python 核心逻辑改编；https://github.com/prometheus/prometheus/pull/15548",
+    "description": "依据飞书《基础模型评测》参考题改编。保留巨大 k 与 histogram int64 数据完整性；显式模拟32位目标，不运行 Go386、race、TSDB/OOO/原子对齐。仅验证下述独立 Python 接口，不等同于原仓库隐藏测试或端到端评测。",
+    "system_prompt": "按公开接口完成 solution.py，仅使用 Python 3.11 标准库。只输出一个 python 围栏块，块内为完整 solution.py，不输出解释。",
+    "requirements": "实现 select_k(samples,k,mode='topk',word_bits=64) -> list；\nsamples 是 int/float 列表，非bool，允许 +/-inf；NaN 忽略。k 为非负 int（非bool），\n不超过 2**63-1；word_bits 仅32或64（非bool），只代表目标字宽，k 不得被窄化或绕回。\ntopk 按值降序、bottomk 升序，平局保持原输入次序；k>=非NaN样本数返回所有，\nk=0返回空，不分配长度为k的结构；非法 mode（仅topk/bottomk）抛ValueError。\n实现 merge_histograms(histograms) -> {'count':int,'buckets':list[int]}；\n每项字典且仅包含 count/buckets；非负整数均不超过2**63-1且非bool，\ncount 必须等于 buckets 之和，所有 histogram buckets 长度一致；\n逐桶加和并求 count，任何最终 int64 溢出 ValueError，不窄化为int32。\n空输入返回 {'count':0,'buckets':[]}；允许零桶且count=0。\n所有操作不改变输入或复用输入 buckets，验证失败亦不得写入输入。保持签名/default。\n只修改 solution.py。禁止 eval/exec；任一函数至多80行（含空行），作为可维护性代理指标。所有输入错误统一抛 ValueError，消息不限。",
+    "public_files": {
+      "solution.py": "def select_k(samples,k,mode='topk',word_bits=64):\n    raise NotImplementedError\ndef merge_histograms(histograms):\n    raise NotImplementedError\n"
+    },
+    "reference_files": {
+      "solution.py": "import math\nMAX_INT64 = 2**63-1\n\ndef _integer(value):\n    if type(value) is not int or not 0 <= value <= MAX_INT64:\n        raise ValueError('int64 required')\n\ndef select_k(samples,k,mode='topk',word_bits=64):\n    _integer(k)\n    if type(word_bits) is not int or word_bits not in (32,64) or mode not in ('topk','bottomk'):\n        raise ValueError('mode or word bits invalid')\n    if not isinstance(samples,list):\n        raise ValueError('list required')\n    values = []\n    for value in samples:\n        if type(value) not in (int,float):\n            raise ValueError('numeric sample required')\n        if type(value) is int or not math.isnan(value):\n            values.append(value)\n    return sorted(values,reverse=mode=='topk')[:min(k,len(values))]\n\ndef merge_histograms(histograms):\n    if not isinstance(histograms,list):\n        raise ValueError('list required')\n    count, buckets = 0, None\n    for hist in histograms:\n        if not isinstance(hist,dict) or set(hist) != {'count','buckets'}:\n            raise ValueError('histogram invalid')\n        _integer(hist['count'])\n        if not isinstance(hist['buckets'],list):\n            raise ValueError('buckets invalid')\n        for value in hist['buckets']:\n            _integer(value)\n        if sum(hist['buckets']) != hist['count']:\n            raise ValueError('count mismatch')\n        if buckets is None:\n            buckets = [0]*len(hist['buckets'])\n        if len(buckets) != len(hist['buckets']):\n            raise ValueError('schema mismatch')\n        count += hist['count']\n        _integer(count)\n        buckets = [a+b for a,b in zip(buckets,hist['buckets'])]\n        for value in buckets:\n            _integer(value)\n    return {'count':count,'buckets':[] if buckets is None else buckets}\n"
+    },
+    "test_files": {
+      "checks.py": "import ast\nimport copy\nimport functools\nimport inspect\nimport math\nimport random\nimport sys\nimport unittest\nimport warnings\nfrom datetime import datetime, timezone, timedelta\nimport solution\n\ndef _case(fn):\n    @functools.wraps(fn)\n    def run():\n        try:\n            fn()\n        except Exception as exc:\n            raise AssertionError(str(exc)) from exc\n    return run\n\n@_case\ndef check_large_values():\n    values = [3,1,2,float('nan'),float('inf'),float('-inf')]\n    for bits in [32,64]:\n        assert solution.select_k(values,9999999999,'bottomk',bits) == [float('-inf'),1,2,3,float('inf')]\n        assert solution.select_k(values,2**63-1,'topk',bits) == [float('inf'),3,2,1,float('-inf')]\n        assert solution.select_k(values,2,'topk',bits) == [float('inf'),3]\n        assert solution.select_k(values,2,'bottomk',bits) == [float('-inf'),1]\n    hist = [{'count':5000000000,'buckets':[3000000000,2000000000]},\n            {'count':4000000000,'buckets':[2000000000,2000000000]}]\n    assert solution.merge_histograms(hist) == {'count':9000000000,'buckets':[5000000000,4000000000]}\n    assert solution.merge_histograms([{'count':2**63-1,'buckets':[2**63-1]}])['count'] == 2**63-1\n\n@_case\ndef check_invalid():\n    for k in [-1,True,1.0,2**63]:\n        with unittest.TestCase().assertRaises(ValueError): solution.select_k([],k)\n    for kwargs in [{'word_bits':16},{'word_bits':True},{'mode':'unknown'}]:\n        with unittest.TestCase().assertRaises(ValueError): solution.select_k([],1,**kwargs)\n    for samples in [[True],['1'],None]:\n        with unittest.TestCase().assertRaises(ValueError): solution.select_k(samples,1)\n    bad = [\n        [{'count':1,'buckets':[0]}], [{'count':True,'buckets':[1]}],\n        [{'count':1,'buckets':[True]}], [{'count':-1,'buckets':[-1]}],\n        [{'count':0,'buckets':[]} , {'count':1,'buckets':[1]}],\n        [{'count':2**63-1,'buckets':[2**63-1]}, {'count':1,'buckets':[1]}],\n        [{'count':0,'buckets':[], 'extra':1}], [{'count':0,'buckets':()}], None,\n    ]\n    for hist in bad:\n        with unittest.TestCase().assertRaises(ValueError): solution.merge_histograms(hist)\n    assert solution.merge_histograms([]) == {'count':0,'buckets':[]}\n    assert solution.select_k([float('nan')],10) == [] and solution.select_k([2],0) == []\n\n@_case\ndef check_input_integrity():\n    values = [4,1,4,2]\n    assert solution.select_k(values,3) == [4,4,2] and values == [4,1,4,2]\n    hist = [{'count':4,'buckets':[3,1]}, {'count':5,'buckets':[2,3]}]\n    before = copy.deepcopy(hist)\n    result = solution.merge_histograms(hist)\n    result['buckets'][0] = 0\n    assert hist == before\n    bad = hist + [{'count':99,'buckets':[0,0]}]\n    snapshot = copy.deepcopy(bad)\n    with unittest.TestCase().assertRaises(ValueError): solution.merge_histograms(bad)\n    assert bad == snapshot\n\n@_case\ndef check_contract():\n    p = inspect.signature(solution.select_k).parameters\n    assert list(p) == ['samples','k','mode','word_bits']\n    assert p['mode'].default == 'topk' and p['word_bits'].default == 64\n    assert list(inspect.signature(solution.merge_histograms).parameters) == ['histograms']\n    result = solution.select_k(samples=[1,1.0,2],k=2,mode='bottomk',word_bits=32)\n    assert type(result[0]) is int and type(result[1]) is float\n    assert solution.merge_histograms(histograms=[{'count':0,'buckets':[]}]) == {'count':0,'buckets':[]}\n\n@_case\ndef check_maintainability():\n    tree = ast.parse(inspect.getsource(solution))\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Call):\n            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, 'attr', '')\n            assert name not in {'eval', 'exec'}\n        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):\n            assert node.end_lineno - node.lineno + 1 <= 80\n"
+    },
+    "negative_files": {
+      "int32_k_wrap": {
+        "solution.py": "import math\nMAX_INT64 = 2**63-1\n\ndef _integer(value):\n    if type(value) is not int or not 0 <= value <= MAX_INT64:\n        raise ValueError('int64 required')\n\ndef select_k(samples,k,mode='topk',word_bits=64):\n    _integer(k)\n    if type(word_bits) is not int or word_bits not in (32,64) or mode not in ('topk','bottomk'):\n        raise ValueError('mode or word bits invalid')\n    if not isinstance(samples,list):\n        raise ValueError('list required')\n    k = (k + 2**31) % 2**32 - 2**31\n    values = []\n    for value in samples:\n        if type(value) not in (int,float):\n            raise ValueError('numeric sample required')\n        if type(value) is int or not math.isnan(value):\n            values.append(value)\n    return sorted(values,reverse=mode=='topk')[:min(k,len(values))]\n\ndef merge_histograms(histograms):\n    if not isinstance(histograms,list):\n        raise ValueError('list required')\n    count, buckets = 0, None\n    for hist in histograms:\n        if not isinstance(hist,dict) or set(hist) != {'count','buckets'}:\n            raise ValueError('histogram invalid')\n        _integer(hist['count'])\n        if not isinstance(hist['buckets'],list):\n            raise ValueError('buckets invalid')\n        for value in hist['buckets']:\n            _integer(value)\n        if sum(hist['buckets']) != hist['count']:\n            raise ValueError('count mismatch')\n        if buckets is None:\n            buckets = [0]*len(hist['buckets'])\n        if len(buckets) != len(hist['buckets']):\n            raise ValueError('schema mismatch')\n        count += hist['count']\n        _integer(count)\n        buckets = [a+b for a,b in zip(buckets,hist['buckets'])]\n        for value in buckets:\n            _integer(value)\n    return {'count':count,'buckets':[] if buckets is None else buckets}\n"
+      },
+      "int32_histogram_wrap": {
+        "solution.py": "import math\nMAX_INT64 = 2**63-1\n\ndef _integer(value):\n    if type(value) is not int or not 0 <= value <= MAX_INT64:\n        raise ValueError('int64 required')\n\ndef select_k(samples,k,mode='topk',word_bits=64):\n    _integer(k)\n    if type(word_bits) is not int or word_bits not in (32,64) or mode not in ('topk','bottomk'):\n        raise ValueError('mode or word bits invalid')\n    if not isinstance(samples,list):\n        raise ValueError('list required')\n    values = []\n    for value in samples:\n        if type(value) not in (int,float):\n            raise ValueError('numeric sample required')\n        if type(value) is int or not math.isnan(value):\n            values.append(value)\n    return sorted(values,reverse=mode=='topk')[:min(k,len(values))]\n\ndef merge_histograms(histograms):\n    if not isinstance(histograms,list):\n        raise ValueError('list required')\n    count, buckets = 0, None\n    for hist in histograms:\n        if not isinstance(hist,dict) or set(hist) != {'count','buckets'}:\n            raise ValueError('histogram invalid')\n        _integer(hist['count'])\n        if not isinstance(hist['buckets'],list):\n            raise ValueError('buckets invalid')\n        for value in hist['buckets']:\n            _integer(value)\n        if sum(hist['buckets']) != hist['count']:\n            raise ValueError('count mismatch')\n        if buckets is None:\n            buckets = [0]*len(hist['buckets'])\n        if len(buckets) != len(hist['buckets']):\n            raise ValueError('schema mismatch')\n        count += hist['count']\n        _integer(count)\n        buckets = [a+b for a,b in zip(buckets,hist['buckets'])]\n        for value in buckets:\n            _integer(value)\n    return {'count':count % 2**32,'buckets':[] if buckets is None else [v % 2**32 for v in buckets]}\n"
+      }
+    },
+    "rubric": [
+      {
+        "check": "check_large_values",
+        "dimension": "functionality",
+        "description": "9999999999 k、32位模拟与 int64 histogram",
+        "critical": false
+      },
+      {
+        "check": "check_invalid",
+        "dimension": "robustness",
+        "description": "非法值、NaN、空输入、schema与溢出",
+        "critical": false
+      },
+      {
+        "check": "check_input_integrity",
+        "dimension": "security",
+        "description": "不改输入、无返回值别名、失败不写入",
+        "critical": true
+      },
+      {
+        "check": "check_contract",
+        "dimension": "compliance",
+        "description": "排序平局稳定、类型与签名",
+        "critical": false
+      },
+      {
+        "check": "check_maintainability",
+        "dimension": "maintainability",
+        "description": "无 eval/exec，函数至多80行",
+        "critical": false
+      }
+    ],
+    "output_format": {
+      "kind": "files",
+      "allowed_paths": [
+        "solution.py"
+      ],
+      "instructions": "只输出一个 ```python 围栏块，内容为完整 solution.py。"
+    },
+    "status": "draft"
+  },
+  {
+    "id": "C14",
+    "scenario_id": "C14",
+    "title": "ShardingSphere：无别名子查询分组修复（Python 核心逻辑改编）",
+    "source": "参考 apache/shardingsphere PR #13809；原语言 Java；Python 核心逻辑改编；https://github.com/apache/shardingsphere/pull/13809",
+    "description": "依据飞书《基础模型评测》参考题改编。保留仅过滤 null alias 的精确修复语义；不运行 Maven、Oracle 或原仓库隐藏测试。仅验证下述独立 Python 接口，不等同于原仓库隐藏测试或端到端评测。",
+    "system_prompt": "按公开接口完成 solution.py，仅使用 Python 3.11 标准库。只输出一个 python 围栏块，块内为完整 solution.py，不输出解释。",
+    "requirements": "实现 group_subqueries(subqueries) -> dict[str,list[dict]]。\nsubqueries 为list，每项为包含 alias 键的dict；alias 为None或str（允许空串）。\n排除且仅排除 alias is None 的行；不得为它生成默认别名。空串仍作为合法分组key。\n重复别名聚为列表，分组key与组内行顺序均按输入首次出现次序；\n其余字段（包括任意嵌套 payload）不做解释，组内每个对象应是原行对象本身。\n不改变输入列表、行字典或嵌套字段；返回组列表是新建的，不得共享输入容器或跨调用复用。\n缺alias、非dict行、非None/str别名（含0、False）均ValueError，失败不修改输入。\n空输入或全None返回{}。保持唯一参数名subqueries。\n只修改 solution.py。禁止 eval/exec；任一函数至多80行（含空行），作为可维护性代理指标。所有输入错误统一抛 ValueError，消息不限。",
+    "public_files": {
+      "solution.py": "def group_subqueries(subqueries):\n    raise NotImplementedError\n"
+    },
+    "reference_files": {
+      "solution.py": "def group_subqueries(subqueries):\n    if not isinstance(subqueries,list):\n        raise ValueError('list required')\n    result = {}\n    for row in subqueries:\n        if not isinstance(row,dict) or 'alias' not in row:\n            raise ValueError('row invalid')\n        alias = row['alias']\n        if alias is not None and not isinstance(alias,str):\n            raise ValueError('alias invalid')\n        if alias is None:\n            continue\n        result.setdefault(alias,[]).append(row)\n    return result\n"
+    },
+    "test_files": {
+      "checks.py": "import ast\nimport copy\nimport functools\nimport inspect\nimport math\nimport random\nimport sys\nimport unittest\nimport warnings\nfrom datetime import datetime, timezone, timedelta\nimport solution\n\ndef _case(fn):\n    @functools.wraps(fn)\n    def run():\n        try:\n            fn()\n        except Exception as exc:\n            raise AssertionError(str(exc)) from exc\n    return run\n\n@_case\ndef check_grouping():\n    rows = [{'alias':None,'query':'Oracle pagination nested select'},\n            {'alias':'t','query':'a'},{'alias':'','query':'blank'},\n            {'alias':'t','query':'b'},{'alias':None},{'alias':'x'}]\n    result = solution.group_subqueries(rows)\n    assert list(result) == ['t','','x']\n    assert result == {'t':[rows[1],rows[3]], '':[rows[2]], 'x':[rows[5]]}\n    assert solution.group_subqueries([{'alias':None}]) == {}\n\n@_case\ndef check_invalid():\n    for rows in [None,{},[None],[{}],[{'alias':0}],[{'alias':False}],[{'alias':[]}]]:\n        with unittest.TestCase().assertRaises(ValueError): solution.group_subqueries(rows)\n    assert solution.group_subqueries([]) == {}\n    assert solution.group_subqueries([{'alias':''}]) == {'':[{'alias':''}]}\n\n@_case\ndef check_input_integrity():\n    rows = [{'alias':'t','payload':{'alias':None,'items':[1,2]}},{'alias':None}]\n    before = copy.deepcopy(rows)\n    result = solution.group_subqueries(rows)\n    assert result['t'][0] is rows[0]\n    result['t'].clear()\n    assert rows == before\n    assert solution.group_subqueries(rows)['t'] == [rows[0]]\n    bad = rows + [{'alias':42}]\n    snapshot = copy.deepcopy(bad)\n    with unittest.TestCase().assertRaises(ValueError): solution.group_subqueries(bad)\n    assert bad == snapshot\n\n@_case\ndef check_contract():\n    assert list(inspect.signature(solution.group_subqueries).parameters) == ['subqueries']\n    rows = [{'alias':'B'},{'alias':'A'},{'alias':'B'},{'alias':''}]\n    result = solution.group_subqueries(subqueries=rows)\n    assert list(result) == ['B','A','']\n    assert result['B'][0] is rows[0] and result['B'][1] is rows[2]\n    assert type(result) is dict and all(type(group) is list for group in result.values())\n\n@_case\ndef check_maintainability():\n    tree = ast.parse(inspect.getsource(solution))\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Call):\n            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, 'attr', '')\n            assert name not in {'eval', 'exec'}\n        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):\n            assert node.end_lineno - node.lineno + 1 <= 80\n"
+    },
+    "negative_files": {
+      "null_alias_not_filtered": {
+        "solution.py": "def group_subqueries(subqueries):\n    if not isinstance(subqueries,list):\n        raise ValueError('list required')\n    result = {}\n    for row in subqueries:\n        if not isinstance(row,dict) or 'alias' not in row:\n            raise ValueError('row invalid')\n        alias = row['alias']\n        if alias is not None and not isinstance(alias,str):\n            raise ValueError('alias invalid')\n        if alias is None:\n            raise ValueError('null key')\n        result.setdefault(alias,[]).append(row)\n    return result\n"
+      },
+      "truthiness_alias_filter": {
+        "solution.py": "def group_subqueries(subqueries):\n    if not isinstance(subqueries,list):\n        raise ValueError('list required')\n    result = {}\n    for row in subqueries:\n        if not isinstance(row,dict) or 'alias' not in row:\n            raise ValueError('row invalid')\n        alias = row['alias']\n        if alias is not None and not isinstance(alias,str):\n            raise ValueError('alias invalid')\n        if not alias:\n            continue\n        result.setdefault(alias,[]).append(row)\n    return result\n"
+      }
+    },
+    "rubric": [
+      {
+        "check": "check_grouping",
+        "dimension": "functionality",
+        "description": "Oracle 无别名输入、重复分组与空串保留",
+        "critical": false
+      },
+      {
+        "check": "check_invalid",
+        "dimension": "robustness",
+        "description": "null与空串精确区分、非法输入",
+        "critical": false
+      },
+      {
+        "check": "check_input_integrity",
+        "dimension": "security",
+        "description": "原行身份、输入不变、组容器独立",
+        "critical": true
+      },
+      {
+        "check": "check_contract",
+        "dimension": "compliance",
+        "description": "签名与首次出现次序",
+        "critical": false
+      },
+      {
+        "check": "check_maintainability",
+        "dimension": "maintainability",
+        "description": "无 eval/exec，函数至多80行",
+        "critical": false
+      }
+    ],
+    "output_format": {
+      "kind": "files",
+      "allowed_paths": [
+        "solution.py"
+      ],
+      "instructions": "只输出一个 ```python 围栏块，内容为完整 solution.py。"
+    },
+    "status": "draft"
+  },
+  {
+    "id": "C15",
+    "scenario_id": "C15",
+    "title": "aiohttp：cleanup_closed 版本与弃用警告（Python 核心逻辑改编）",
+    "source": "参考 aio-libs/aiohttp PR #9726；原语言 Python；Python 核心逻辑改编；https://github.com/aio-libs/aiohttp/pull/9726",
+    "description": "依据飞书《基础模型评测》参考题改编。保留 Python patch 版本边界、警告类别/位置与构造器状态；不运行 aiohttp 原172项集成测试。仅验证下述独立 Python 接口，不等同于原仓库隐藏测试或端到端评测。",
+    "system_prompt": "按公开接口完成 solution.py，仅使用 Python 3.11 标准库。只输出一个 python 围栏块，块内为完整 solution.py，不输出解释。",
+    "requirements": "实现 needs_cleanup_closed(version) -> bool；\nversion 为3个非负整数组成的tuple，非bool；规则精确为：\n(3,13,0)<=version<(3,13,1) or version<(3,12,7)。\n模块常量 NEEDS_CLEANUP_CLOSED 按真实 sys.version_info[:3] 在导入时计算。\n实现 Connector(enable_cleanup_closed=False,version=None)；\nversion=None 用真实sys.version_info[:3]，否则用注入tuple；\nenable_cleanup_closed 必须bool。若 enable=True且不需要清理，发出且仅发出一条\nDeprecationWarning，文本含 'cleanup_closed ignored'，stacklevel=2 指向调用构造器的位置，\n并使 _cleanup_closed_disabled=True；其他情况无警告且 _cleanup_closed_disabled=not enable。\n禁止修改全局warnings过滤器、sys.version_info或NEEDS_CLEANUP_CLOSED，跨实例状态独立。\n非法输入抛ValueError且不发弃用警告。保持签名及默认参数。\n只修改 solution.py。禁止 eval/exec；任一函数至多80行（含空行），作为可维护性代理指标。所有输入错误统一抛 ValueError，消息不限。",
+    "public_files": {
+      "solution.py": "NEEDS_CLEANUP_CLOSED = True\ndef needs_cleanup_closed(version):\n    raise NotImplementedError\nclass Connector:\n    def __init__(self,enable_cleanup_closed=False,version=None):\n        raise NotImplementedError\n"
+    },
+    "reference_files": {
+      "solution.py": "import sys\nimport warnings\n\ndef needs_cleanup_closed(version):\n    if not isinstance(version,tuple) or len(version) != 3:\n        raise ValueError('version tuple required')\n    if any(type(v) is not int or v < 0 for v in version):\n        raise ValueError('version fields invalid')\n    return (3,13,0) <= version < (3,13,1) or version < (3,12,7)\n\nNEEDS_CLEANUP_CLOSED = needs_cleanup_closed(sys.version_info[:3])\n\nclass Connector:\n    def __init__(self,enable_cleanup_closed=False,version=None):\n        if type(enable_cleanup_closed) is not bool:\n            raise ValueError('bool required')\n        needs = needs_cleanup_closed(sys.version_info[:3] if version is None else version)\n        self._cleanup_closed_disabled = not enable_cleanup_closed\n        if enable_cleanup_closed and not needs:\n            warnings.warn('cleanup_closed ignored',DeprecationWarning,stacklevel=2)\n            self._cleanup_closed_disabled = True\n"
+    },
+    "test_files": {
+      "checks.py": "import ast\nimport copy\nimport functools\nimport inspect\nimport math\nimport random\nimport sys\nimport unittest\nimport warnings\nfrom datetime import datetime, timezone, timedelta\nimport solution\n\ndef _case(fn):\n    @functools.wraps(fn)\n    def run():\n        try:\n            fn()\n        except Exception as exc:\n            raise AssertionError(str(exc)) from exc\n    return run\n\nVERSIONS = [((3,11,9),True),((3,12,0),True),((3,12,6),True),((3,12,7),False),\n            ((3,12,99),False),((3,13,0),True),((3,13,1),False),((3,13,9),False),((3,14,0),False)]\n\n@_case\ndef check_version_policy():\n    for version,needs in VERSIONS:\n        assert solution.needs_cleanup_closed(version) is needs\n        for enabled in [False,True]:\n            with warnings.catch_warnings(record=True) as caught:\n                warnings.simplefilter('always')\n                connector = solution.Connector(enabled,version)\n            assert connector._cleanup_closed_disabled is (not enabled or not needs)\n            assert len(caught) == int(enabled and not needs)\n            if caught:\n                assert caught[0].category is DeprecationWarning\n                assert 'cleanup_closed ignored' in str(caught[0].message)\n\n@_case\ndef check_invalid():\n    for version in [None,[3,12,7],(3,12),(3,12,7,0),(-1,0,0),(True,12,7),(3,'12',7)]:\n        with unittest.TestCase().assertRaises(ValueError):\n            solution.needs_cleanup_closed(version)\n    with warnings.catch_warnings(record=True) as caught:\n        warnings.simplefilter('always')\n        for enabled in [1,None,'true']:\n            with unittest.TestCase().assertRaises(ValueError):\n                solution.Connector(enabled,(3,12,7))\n        with unittest.TestCase().assertRaises(ValueError):\n            solution.Connector(True,(3,12))\n    assert not caught\n\n@_case\ndef check_global_integrity():\n    before = (sys.version_info,solution.NEEDS_CLEANUP_CLOSED,list(warnings.filters))\n    a = solution.Connector(True,(3,11,0))\n    b = solution.Connector(False,(3,11,0))\n    b._cleanup_closed_disabled = False\n    assert a._cleanup_closed_disabled is False\n    assert solution.Connector(False,(3,11,0))._cleanup_closed_disabled is True\n    assert (sys.version_info,solution.NEEDS_CLEANUP_CLOSED,list(warnings.filters)) == before\n\n@_case\ndef check_warning_contract():\n    p = inspect.signature(solution.Connector).parameters\n    assert list(p) == ['enable_cleanup_closed','version']\n    assert p['enable_cleanup_closed'].default is False and p['version'].default is None\n    assert list(inspect.signature(solution.needs_cleanup_closed).parameters) == ['version']\n    expected = (3,13,0) <= sys.version_info[:3] < (3,13,1) or sys.version_info[:3] < (3,12,7)\n    assert solution.NEEDS_CLEANUP_CLOSED is expected\n    assert solution.Connector()._cleanup_closed_disabled is True\n    line = 75\n    with warnings.catch_warnings(record=True) as caught:\n        warnings.simplefilter('always')\n        solution.Connector(enable_cleanup_closed=True,version=(3,12,7))\n    assert len(caught) == 1\n    assert caught[0].filename == __file__ and caught[0].lineno == line\n\n@_case\ndef check_maintainability():\n    tree = ast.parse(inspect.getsource(solution))\n    for node in ast.walk(tree):\n        if isinstance(node, ast.Call):\n            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, 'attr', '')\n            assert name not in {'eval', 'exec'}\n        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):\n            assert node.end_lineno - node.lineno + 1 <= 80\n"
+    },
+    "negative_files": {
+      "minor_version_only": {
+        "solution.py": "import sys\nimport warnings\n\ndef needs_cleanup_closed(version):\n    if not isinstance(version,tuple) or len(version) != 3:\n        raise ValueError('version tuple required')\n    if any(type(v) is not int or v < 0 for v in version):\n        raise ValueError('version fields invalid')\n    return version < (3,13,0)\n\nNEEDS_CLEANUP_CLOSED = needs_cleanup_closed(sys.version_info[:3])\n\nclass Connector:\n    def __init__(self,enable_cleanup_closed=False,version=None):\n        if type(enable_cleanup_closed) is not bool:\n            raise ValueError('bool required')\n        needs = needs_cleanup_closed(sys.version_info[:3] if version is None else version)\n        self._cleanup_closed_disabled = not enable_cleanup_closed\n        if enable_cleanup_closed and not needs:\n            warnings.warn('cleanup_closed ignored',DeprecationWarning,stacklevel=2)\n            self._cleanup_closed_disabled = True\n"
+      },
+      "wrong_warning_stacklevel": {
+        "solution.py": "import sys\nimport warnings\n\ndef needs_cleanup_closed(version):\n    if not isinstance(version,tuple) or len(version) != 3:\n        raise ValueError('version tuple required')\n    if any(type(v) is not int or v < 0 for v in version):\n        raise ValueError('version fields invalid')\n    return (3,13,0) <= version < (3,13,1) or version < (3,12,7)\n\nNEEDS_CLEANUP_CLOSED = needs_cleanup_closed(sys.version_info[:3])\n\nclass Connector:\n    def __init__(self,enable_cleanup_closed=False,version=None):\n        if type(enable_cleanup_closed) is not bool:\n            raise ValueError('bool required')\n        needs = needs_cleanup_closed(sys.version_info[:3] if version is None else version)\n        self._cleanup_closed_disabled = not enable_cleanup_closed\n        if enable_cleanup_closed and not needs:\n            warnings.warn('cleanup_closed ignored',DeprecationWarning,stacklevel=1)\n            self._cleanup_closed_disabled = True\n"
+      }
+    },
+    "rubric": [
+      {
+        "check": "check_version_policy",
+        "dimension": "functionality",
+        "description": "3.12.7/3.13.0/3.13.1 边界与状态",
+        "critical": false
+      },
+      {
+        "check": "check_invalid",
+        "dimension": "robustness",
+        "description": "版本类型与无效开关无警告",
+        "critical": false
+      },
+      {
+        "check": "check_global_integrity",
+        "dimension": "security",
+        "description": "实例隔离与全局依赖不变",
+        "critical": true
+      },
+      {
+        "check": "check_warning_contract",
+        "dimension": "compliance",
+        "description": "弃用警告调用位置、签名及真实版本常量",
+        "critical": false
+      },
+      {
+        "check": "check_maintainability",
+        "dimension": "maintainability",
+        "description": "无 eval/exec，函数至多80行",
+        "critical": false
+      }
+    ],
+    "output_format": {
+      "kind": "files",
+      "allowed_paths": [
+        "solution.py"
+      ],
+      "instructions": "只输出一个 ```python 围栏块，内容为完整 solution.py。"
+    },
+    "status": "draft"
+  }
+]

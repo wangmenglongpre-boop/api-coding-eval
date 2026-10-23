@@ -1,0 +1,3 @@
+include scripts/build_reference_catalog.py
+include scripts/validate_reference_catalog.py
+recursive-include .trae/specs/build-api-coding-eval-app/reference-datasets *.md
