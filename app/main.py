@@ -1,38 +1,20 @@
 """启动：python -m streamlit run app/main.py --server.address 127.0.0.1"""
 
 from collections.abc import Callable
-from importlib import import_module, reload
-from pathlib import Path
-
 import streamlit as st
 
 from coding_eval.storage import AppPaths, Storage
+from coding_eval.ui_bootstrap import load_ui_modules
 
-run_module = import_module("app.run_page")
-
-# Upgrade only the cached UI module; retain worker resources and backend modules.
-if getattr(run_module, "PLAN_PREVIEW_REVISION", None) != "ready-snapshot-v1":
-    run_module = reload(run_module)
-render_runs = run_module.render
-
-# Upgrade presentation only; explicitly preserve the existing credential-free worker resource.
-ui_queries = import_module("coding_eval.ui_queries")
-product_style = import_module("app.product_style")
-dataset_page = import_module("app.dataset_page")
-model_page = import_module("app.model_page")
-report_page = import_module("app.report_page")
-report_views = import_module("coding_eval.report_views")
-report_charts = import_module("app.report_charts")
-
-for ui_module in (ui_queries, product_style, dataset_page, model_page, report_views,
-                  report_charts, report_page, run_module):
-    source_stamp = Path(ui_module.__file__).stat().st_mtime_ns
-    if getattr(ui_module, "_PRODUCT_LOADED_MTIME", None) != source_stamp:
-        old_registry = getattr(ui_module, "worker_registry", None)
-        reload(ui_module)
-        if old_registry is not None:
-            ui_module.worker_registry = old_registry
-        ui_module._PRODUCT_LOADED_MTIME = source_stamp
+ui_modules = load_ui_modules()
+ui_queries = ui_modules["coding_eval.ui_queries"]
+product_style = ui_modules["app.product_style"]
+dataset_page = ui_modules["app.dataset_page"]
+model_page = ui_modules["app.model_page"]
+report_views = ui_modules["coding_eval.report_views"]
+report_charts = ui_modules["app.report_charts"]
+report_page = ui_modules["app.report_page"]
+run_module = ui_modules["app.run_page"]
 render_models, render_datasets = model_page.render, dataset_page.render
 render_reports, render_runs = report_page.render, run_module.render
 apply_style = product_style.apply_style

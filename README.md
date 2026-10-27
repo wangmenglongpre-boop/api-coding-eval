@@ -4,6 +4,12 @@
 
 ## 当前验收状态
 
+2026-10-27 修复常驻前端 `ImportError: cannot import name 'difficulty_rows'`：
+按依赖顺序刷新 `report_views → report_charts → report_page` 后再加载消费者，
+并保留后台worker、模型契约和运行中批次。8501与8502四页均已在真实浏览器恢复，
+专项24项测试通过，完整回归597 passed/101 skipped；无需重启服务。详见
+[导入缓存修复设计](.trae/specs/build-api-coding-eval-app/livecodebench/import-refresh/design.md)。
+
 2026-10-27 新增官方 **LiveCodeBench 固定 release_v6 分层抽样**入口。
 固定 revision `0fe84c3912ea0c4d4a78037083943e8f0c4dd505`；截至本次核验
 `release_latest` 与累计 `release_v6` 对应相同六个分片，包含 **1055 题**
