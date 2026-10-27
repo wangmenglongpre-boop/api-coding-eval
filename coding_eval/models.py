@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, Mapping, Self
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_serializer, model_validator
 
 Identifier = Annotated[str, Field(min_length=1, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
 NonNegative = Annotated[float, Field(ge=0)]
@@ -188,6 +188,31 @@ class RuntimeConfig(Contract):
     pids_limit: Annotated[int, Field(gt=0)] = 64
 
 
+class BenchmarkInfo(Contract):
+    dataset: Literal["livecodebench/code_generation_lite"]
+    release: Literal["release_v6"]
+    revision: Literal["0fe84c3912ea0c4d4a78037083943e8f0c4dd505"]
+    platform: Literal["leetcode", "atcoder", "codeforces"]
+    question_id: str
+    contest_date: str
+    difficulty: Literal["easy", "medium", "hard"]
+    row_hash: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+    tests_hash: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+    test_count: Annotated[int, Field(gt=0)]
+    func_name: Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")] | None = None
+    grader: Literal["lcb-docker-v1"] = "lcb-docker-v1"
+
+
+class SamplingInfo(Contract):
+    dataset_revision: Literal["0fe84c3912ea0c4d4a78037083943e8f0c4dd505"]
+    release: Literal["release_v6"] = "release_v6"
+    method: Literal["difficulty-stratified-without-replacement-v1"] = "difficulty-stratified-without-replacement-v1"
+    seed: int
+    counts: dict[str, Annotated[int, Field(ge=0)]]
+    population: dict[str, Annotated[int, Field(gt=0)]]
+    task_versions: dict[str, str]
+
+
 class TaskDefinition(VersionedContract):
     id: Identifier
     scenario_id: Identifier
@@ -208,6 +233,14 @@ class TaskDefinition(VersionedContract):
     status: Literal["draft", "ready"] = "draft"
     validation_evidence: tuple[str, ...] = ()
     validated_content_hash: str | None = None
+    benchmark: BenchmarkInfo | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_compatible(self, handler):
+        value = handler(self)
+        if self.benchmark is None:
+            value.pop("benchmark", None)
+        return value
 
     @property
     def ready(self) -> bool:
@@ -227,8 +260,21 @@ class TaskDefinition(VersionedContract):
         checks = [item.check for item in self.rubric]
         if len(checks) != len(set(checks)):
             raise ValueError("每个 check 只能归属一个维度且只能计分一次")
+        if self.benchmark:
+            if (set(self.test_files) != {"cases.json"} or self.reference_files or self.negative_files
+                    or self.scoring.template_id != "livecodebench-pass-v1"
+                    or self.scoring.dimension_weights != (Weight(name="functionality", weight=1),)
+                    or self.scenario_id != "LCB-" + self.benchmark.difficulty
+                    or len(self.rubric) != 1 or self.rubric[0].check != "all_tests"
+                    or self.rubric[0].dimension != Dimension.FUNCTIONALITY
+                    or not self.rubric[0].required
+                    or self.benchmark.tests_hash != content_hash(self.test_files["cases.json"])):
+                raise ValueError("LiveCodeBench 任务必须绑定原始测试、难度与单一正确性评分")
         if self.ready:
-            if not (self.reference_files and self.test_files and self.negative_files
+            if self.benchmark:
+                if not self.validation_evidence:
+                    raise ValueError("Benchmark readiness requires dataset/runtime evidence")
+            elif not (self.reference_files and self.test_files and self.negative_files
                     and all(self.negative_files.values()) and self.rubric and self.validation_evidence):
                 raise ValueError("ready 任务必须有参考解、测试、错误解、评分项与验证证据")
             if {item.dimension.value for item in self.rubric} != {w.name for w in self.scoring.dimension_weights}:
@@ -283,6 +329,14 @@ class RunPlan(VersionedContract):
     max_requests: Annotated[int, Field(gt=0)]
     budget_group: Identifier = "default"
     diagnostic: bool = False
+    sampling: SamplingInfo | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_compatible(self, handler):
+        value = handler(self)
+        if self.sampling is None:
+            value.pop("sampling", None)
+        return value
 
     @property
     def expected_requests(self) -> int:
@@ -306,6 +360,16 @@ class RunPlan(VersionedContract):
             raise ValueError("场景权重必须完整覆盖计划中的场景")
         if self.max_requests < self.expected_requests * (1 + self.max_retries):
             raise ValueError("请求预算不足以覆盖样本及声明的重试上限")
+        if self.sampling:
+            counts = {d: sum(t.scenario_id == "LCB-" + d for t in tasks)
+                      for d in ("easy", "medium", "hard")}
+            if (self.sampling.seed != self.random_seed or self.sampling.counts != counts
+                    or set(self.sampling.population) != set(counts)
+                    or any(counts[d] > self.sampling.population[d] for d in counts)
+                    or any(not t.benchmark or t.benchmark.revision != self.sampling.dataset_revision
+                           for t in tasks)
+                    or self.sampling.task_versions != {t.id: t.version_hash for t in tasks}):
+                raise ValueError("抽样元数据必须匹配冻结题目、版本、数量和随机种子")
         return self
 
 

@@ -215,6 +215,21 @@ def _monitor(storage: Storage, paths: AppPaths, run_id: str) -> None:
 def render(storage: Storage, paths: AppPaths) -> None:
     st.caption("独立原始 API 请求，无工具、历史或全局优化提示。预览后才开始评测。")
     models = [m for m in current_models(storage) if m.enabled]
+    source = st.radio("评测题库", ("企业场景题", "LiveCodeBench（按难度抽样）"),
+                      horizontal=True, key="run_dataset_source")
+    if source == "LiveCodeBench（按难度抽样）":
+        if "sampling" not in RunPlan.model_fields:
+            st.info("当前进程正在使用升级前的数据契约。为保留正在运行的批次，请在新版服务使用 LiveCodeBench。")
+            st.link_button("打开新版评测服务", "http://127.0.0.1:8502/?page=评测运行")
+            _history(storage, paths)
+            return
+        from app.livecodebench_page import render as render_lcb
+        if st.session_state.pop("_lcb_reset_seed", False):
+            import secrets
+            st.session_state["lcb-seed"] = secrets.randbelow(2**31)
+        render_lcb(storage, paths, models, worker_registry())
+        _history(storage, paths)
+        return
     diagnostic = st.checkbox("诊断模式（允许 draft，不进入正式排行）", key="run_diagnostic")
     if diagnostic:
         st.warning("诊断模式允许在 Docker 不可用时调用 API，可能产生费用且无法判分；仍需确认冻结计划费用。")

@@ -21,8 +21,11 @@ product_style = import_module("app.product_style")
 dataset_page = import_module("app.dataset_page")
 model_page = import_module("app.model_page")
 report_page = import_module("app.report_page")
+report_views = import_module("coding_eval.report_views")
+report_charts = import_module("app.report_charts")
 
-for ui_module in (ui_queries, product_style, dataset_page, model_page, report_page, run_module):
+for ui_module in (ui_queries, product_style, dataset_page, model_page, report_views,
+                  report_charts, report_page, run_module):
     source_stamp = Path(ui_module.__file__).stat().st_mtime_ns
     if getattr(ui_module, "_PRODUCT_LOADED_MTIME", None) != source_stamp:
         old_registry = getattr(ui_module, "worker_registry", None)

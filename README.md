@@ -4,6 +4,38 @@
 
 ## 当前验收状态
 
+2026-10-27 新增官方 **LiveCodeBench 固定 release_v6 分层抽样**入口。
+固定 revision `0fe84c3912ea0c4d4a78037083943e8f0c4dd505`；截至本次核验
+`release_latest` 与累计 `release_v6` 对应相同六个分片，包含 **1055 题**
+（Easy 322 / Medium 383 / Hard 350）。不会每次自动追踪 latest 或只使用 test6 增量。
+默认各难度抽10题、每题生成一次，所有模型共享同一份样本；四模型默认120次请求。
+计划冻结 seed、题号、内容/测试哈希及来源，恢复不重新抽题；支持下载计划 JSON。
+主指标为原始公开+隐藏测试全部通过率，报告包含难度图表及耗时/Token，保留失败记录。
+
+使用：在“评测运行”选择“LiveCodeBench（按难度抽样）”，设置数量/seed，
+生成预览后确认费用并开始。准备题库、预览、校验及导出不调用模型。
+本次为保留8501上的运行中批次，新版部署在 **http://127.0.0.1:8502**，共用既有数据库；
+8501进程的旧契约会提示新版入口。以后正常冷启动主服务即可使用同一功能。
+
+首次准备需下载约4.5GB公开原始数据，六分片分别校验SHA256，完成后保留约3.1GB本地压缩缓存，
+不上传题库到Git；暂停/失败后复用已经校验的分片。可运行：
+
+```bash
+python -m scripts.prepare_livecodebench
+python -m scripts.validate_livecodebench --all --docker-smoke
+CODING_EVAL_DOCKER_TESTS=1 python -m pytest tests/test_livecodebench.py -q
+```
+
+隐藏测试载荷在计划中保持压缩，判分时安全解码；不执行远程loader或pickle全局对象。
+Benchmark ready 表示与固定原题、原始测试结构、冻结Docker环境相符，**不表示参考解已验证**。
+这是本应用的Docker适配：Python3.11标准库，每测试6秒、整题120秒、512MB，
+输出最多16MB；函数题逐测试重置实例、调试输出忽略。原始stdin逐行strip/精确Decimal比较，
+函数题JSON实参/精确相等/顶层tuple转list。与上游进程复用及时间限制有差异，**不能当作官方榜单得分**。
+不同抽样批次不能当作同题直接对比；复现实验请使用相同seed、pin和冻结题目版本。
+设计与验收见 [LiveCodeBench SPEC](.trae/specs/build-api-coding-eval-app/livecodebench/design.md)。
+本轮验证：595项离线通过、101项真实Docker门禁跳过；10项新增Docker实测通过，
+1055道原题结构全量校验通过，两道官方原题的正/负解共4次Docker冒烟通过；未调用付费模型。
+
 2026-10-27 已修复 C11 畸形返回值触发 `KeyError` 后被误判为判分器故障的问题。
 判分器 `docker-python-v4` 对已知 C11 测试版本增加返回结构断言；
 冻结计划与原始题库不改写，每次保存有效测试源码及迁移 hash。

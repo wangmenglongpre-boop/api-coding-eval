@@ -46,6 +46,8 @@ def token_rows(report: ReportVersion, population: str = "all_attempts") -> list[
 
 def radar_rows(report: ReportVersion) -> list[dict]:
     dimensions = [w.name for w in report.scoring.dimension_weights]
+    if len(dimensions) < 2:
+        return []
     rows = []
     for key, model in report.payload["models"].items():
         values = [model.get("dimension_scores", {}).get(d) for d in dimensions]
@@ -54,6 +56,16 @@ def radar_rows(report: ReportVersion) -> list[dict]:
             rows.append({"model_id": key, "模型": model_name(report, key), "values": values,
                          "labels": [DIMENSION_LABELS.get(d, d) for d in dimensions]})
     return rows
+
+
+def difficulty_rows(report: ReportVersion) -> list[dict]:
+    labels = {"LCB-easy": "简单 Easy", "LCB-medium": "中等 Medium", "LCB-hard": "困难 Hard"}
+    return [
+        {"model_id": key, "模型": model_name(report, key), "难度": labels[scenario],
+         "value": value.get("quality_score"), "color": index}
+        for index, (key, model) in enumerate(report.payload["models"].items())
+        for scenario, value in model.get("scenarios", {}).items() if scenario in labels
+    ]
 
 
 def number(value) -> str:
@@ -88,6 +100,8 @@ def bars_svg(rows: list[dict], title: str, maximum: float | None = None) -> str:
 def radar_svg(report: ReportVersion) -> str:
     rows = radar_rows(report)
     if not rows:
+        if len(report.scoring.dimension_weights) == 1:
+            return "<p>单一正确性评分，查看分难度全通过率。</p>"
         return "<p>暂无完整维度数据可绘制雷达图；缺失维度不补零。</p>"
     labels, size = rows[0]["labels"], len(rows[0]["values"])
     cx, cy, radius = 320, 235, 155
@@ -147,6 +161,15 @@ def export_visual_html(report: ReportVersion) -> str:
         + ("未知" if r["缺失率"] is None else f'{r["缺失率"]:.0%}') + '</td></tr>' for r in tokens
     ) + '</table>'
     warnings = "".join(f'<li>{_escape(note)}</li>' for note in report.payload["warnings"])
+    difficulty = difficulty_rows(report)
+    dimensions_chart = (
+        '<section><h2>分难度全通过率（%）</h2>' + bars_svg([
+            {**row, "label": f'{row["模型"]} · {row["难度"]}'} for row in difficulty
+        ], "分难度原始测试全通过率（%）", maximum=100) + '</section>'
+        if difficulty else
+        '<section><h2>质量维度雷达图</h2>' + radar_svg(report)
+        + '<p>沿用冻结权重与质量维度，缺失不补零；暂定报告不提供正式排名。</p></section>'
+    )
     answers = []
     by_id = {a["id"]: a for a in report.payload["attempts"]}
     for sample in report.payload["samples"]:
@@ -171,8 +194,7 @@ def export_visual_html(report: ReportVersion) -> str:
         f'<p>run: {_escape(report.run_id)}; status: {_escape(report.status)}; post_hoc: {report.post_hoc}</p>'
         '<div class="cards">' + cards + '</div>'
         '<section><h2>质量总分（0–100）</h2>' + score_bars + '</section>'
-        '<section><h2>质量维度雷达图</h2>' + radar_svg(report)
-        + '<p>沿用冻结权重与质量维度，缺失不补零；暂定报告不提供正式排名。</p></section>'
+        + dimensions_chart +
         '<section><h2>平均 Token 对比</h2><p>全部实际请求，含失败和重试。均值只含已上报数据，'
         '有效请求数按指标分别计算；未上报不等于零。缓存命中是输入的子集，不能相加。'
         '输出按供应商 usage 统计，可能包含思考。</p>' + token_bars + table + '</section>'

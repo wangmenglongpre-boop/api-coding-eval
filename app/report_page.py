@@ -161,6 +161,12 @@ def _answers(report: ReportVersion) -> None:
 
 def _show_report(report: ReportVersion) -> None:
     payload = report.payload
+    sampling = payload["comparability"].get("sampling")
+    if sampling:
+        st.caption(f"LiveCodeBench {sampling['release']} · seed {sampling['seed']} · "
+                   f"revision {sampling['dataset_revision'][:12]}")
+        st.write("全通过率表示一份答案通过该题全部原始测试。功能分 / 100 为加权全通过率；"
+                 "下方 LCB-easy / medium / hard 分别对应简单、中等、困难。")
     section = st.radio("报告视图", ("总览", "答案对比", "详细证据"), horizontal=True,
                        key=f"report-section-{report.id}")
     if section == "答案对比":

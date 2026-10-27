@@ -190,6 +190,7 @@ class ContainerResult:
 
 def run_command(
     argv: list[str], *, timeout: float, input_data: bytes | None = None,
+    output_limit: int = LOG_LIMIT,
 ) -> CommandResult:
     """Drain both pipes with bounded storage, including when output is hostile."""
     process = subprocess.Popen(
@@ -201,13 +202,14 @@ def run_command(
     deadline = time.monotonic() + timeout
     timed_out = False
     try:
-        if input_data is not None:
-            try:
-                process.stdin.write(input_data)
-                process.stdin.close()
-            except BrokenPipeError:
-                pass
         with selectors.DefaultSelector() as selector:
+            input_offset = 0
+            if input_data is not None:
+                os.set_blocking(process.stdin.fileno(), False)
+                if input_data:
+                    selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+                else:
+                    process.stdin.close()
             for name in buffers:
                 pipe = getattr(process, name)
                 os.set_blocking(pipe.fileno(), False)
@@ -218,12 +220,23 @@ def run_command(
                     process.kill()
                     break
                 for key, _ in selector.select(min(0.1, max(0, deadline - time.monotonic()))):
+                    if key.data == "stdin":
+                        try:
+                            input_offset += os.write(
+                                key.fileobj.fileno(), input_data[input_offset:input_offset + 8192],
+                            )
+                        except BrokenPipeError:
+                            input_offset = len(input_data)
+                        if input_offset == len(input_data):
+                            selector.unregister(key.fileobj)
+                            key.fileobj.close()
+                        continue
                     chunk = os.read(key.fileobj.fileno(), 8192)
                     if not chunk:
                         selector.unregister(key.fileobj)
                         continue
                     buffer = buffers[key.data]
-                    remaining = LOG_LIMIT - len(buffer)
+                    remaining = output_limit - len(buffer)
                     buffer.extend(chunk[:remaining])
                     if len(chunk) > remaining:
                         truncated.add(key.data)

@@ -45,6 +45,18 @@ class TaskValidationError(ValueError):
 
 
 def _task_contract(task: TaskDefinition) -> None:
+    if task.benchmark:
+        from .lcb_test_data import read_test_data
+        if (task.output_format.kind != "files" or task.output_format.allowed_paths != ("solution.py",)
+                or task.public_files):
+            raise SandboxError("Benchmark answers require solution.py and no public files")
+        value = read_test_data(json.loads(task.test_files["cases.json"]))
+        cases = value["cases"]
+        if (len(cases) != task.benchmark.test_count
+                or value["func_name"] != task.benchmark.func_name
+                or any(c["testtype"] != ("functional" if value["func_name"] else "stdin") for c in cases)):
+            raise SandboxError("Original tests do not match benchmark contract")
+        return
     allowed = task.output_format.allowed_paths
     if len(allowed) != 1 or allowed[0] not in {"solution.py", "test_solution.py"}:
         raise SandboxError("Exactly one allowed path, solution.py or test_solution.py, is required")
@@ -158,9 +170,16 @@ def _stage(directory: Path, task: TaskDefinition, files: dict[str, str]) -> None
             path.write_text(source, encoding="utf-8")
             path.chmod(0o644)
     # Only the framework runner is read on the host; task files remain data.
-    runner = Path(__file__).with_name("container_check.py").read_text(encoding="utf-8")
+    runner_name = "lcb_container.py" if task.benchmark else "container_check.py"
+    runner = Path(__file__).with_name(runner_name).read_text(encoding="utf-8")
     (directory / "runner.py").write_text(runner, encoding="utf-8")
     (directory / "runner.py").chmod(0o644)
+    if task.benchmark:
+        for name, target in (("lcb_candidate.py", "candidate.py"), ("container_check.py", "container_check.py"),
+                             ("lcb_test_data.py", "lcb_test_data.py")):
+            path = directory / target
+            path.write_text(Path(__file__).with_name(name).read_text(encoding="utf-8"), encoding="utf-8")
+            path.chmod(0o644)
     _write_json(directory / "job.json", {
         "checks": [item.check for item in task.rubric], "candidate_paths": list(files),
     })
@@ -215,7 +234,8 @@ def _judge_attempt(
         result_path = folder / "result.json"
         result = JudgeResult(
             id=result_id, attempt_id=attempt.id, task_version_hash=task.version_hash,
-            judge_version=JUDGE_VERSION, status=status, checks=tuple(checks),
+            judge_version=task.benchmark.grader if task.benchmark else JUDGE_VERSION,
+            status=status, checks=tuple(checks),
             dimension_scores=scores, quality_score=quality, all_required_passed=required,
             gate_failures=tuple(dict.fromkeys(gates)),
             artifact_paths=tuple([*artifacts, str(result_path)]),
@@ -263,7 +283,7 @@ def _judge_attempt(
         with tempfile.TemporaryDirectory(prefix="coding-eval-") as temporary:
             directory = Path(temporary)
             _stage(directory, task, files)
-            _, migration = migrate_check_source(task.test_files["checks.py"])
+            _, migration = migrate_check_source(task.test_files.get("checks.py", ""))
             if migration:
                 effective_path = folder / "effective_checks.py"
                 effective_path.write_text(
@@ -312,6 +332,9 @@ def validate_task(task: TaskDefinition, paths: AppPaths) -> TaskDefinition:
     results: list[JudgeResult] = []
     try:
         _task_contract(task)
+        if task.benchmark:
+            from .livecodebench import validate_benchmark
+            return validate_benchmark(task, paths)
         if not task.reference_files or not task.negative_files:
             raise SandboxError("Validation needs a reference and at least one negative")
         sandbox = DockerSandbox(task.runtime)

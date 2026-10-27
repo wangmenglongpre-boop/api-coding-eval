@@ -356,6 +356,11 @@ def build_report(
         "judge_versions": judge_versions, "diagnostic": plan.diagnostic,
     }
     warnings = list(NOTES)
+    if plan.sampling:
+        comparability["sampling"] = plan.sampling.model_dump(mode="json")
+        warnings.append("LiveCodeBench 固定 release_v6 分层抽样；功能分为整题原始测试全通过率×100。"
+                        "仅 Python 3.11 标准库，每测试6秒、整题120秒、512MB；函数题逐测试重置实例。"
+                        "这是本应用的 Docker 适配结果，不等同官方榜单；不同样本不能当作同题对比。")
     if plan.diagnostic:
         warnings.append("诊断运行不形成正式排名；任务 ready 状态以冻结快照为准。")
     if len(judge_versions) > 1:
@@ -382,7 +387,8 @@ def build_report(
         },
         "task_metadata": {
             t: {"title": task.title, "scenario_id": task.scenario_id, "version_hash": task.version_hash,
-                "source": task.source, "ready": task.ready}
+                "source": task.source, "ready": task.ready,
+                **({"benchmark": task.benchmark.model_dump(mode="json")} if task.benchmark else {})}
             for t, task in sorted(tasks.items())
         },
         "attempts": [a.model_dump(mode="json") for a in included],
@@ -544,6 +550,9 @@ def export_csv(report: ReportVersion) -> str:
         "attempt_id", "raw_output", "raw_response", *METRIC_NAMES,
         "model_summary", "attempts", "judges", "warnings",
     ]
+    is_benchmark = any(t.get("benchmark") for t in report.payload["task_metadata"].values())
+    if is_benchmark:
+        fields.extend(["difficulty", "dataset_revision", "sampling"])
     writer = csv.DictWriter(output, fieldnames=fields)
     writer.writeheader()
     attempts = {a["id"]: a for a in report.payload["attempts"]}
@@ -562,6 +571,10 @@ def export_csv(report: ReportVersion) -> str:
             warnings=report.payload["warnings"],
         )
         row.update({name: selected.get("metrics", {}).get(name) for name in METRIC_NAMES})
+        if is_benchmark:
+            info = report.payload["task_metadata"][sample["task_id"]].get("benchmark", {})
+            row.update(difficulty=info.get("difficulty"), dataset_revision=info.get("revision"),
+                       sampling=report.payload["comparability"].get("sampling"))
         writer.writerow({key: _csv_cell(value) for key, value in row.items()})
     return output.getvalue()
 

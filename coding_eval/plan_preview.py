@@ -51,7 +51,8 @@ def create_plan(
             task.scoring.template_id == scoring.template_id
             and task.scoring.dimension_weights == scoring.dimension_weights
         )
-        if task.scoring != scoring and not (task.ready and same_dimensions):
+        if (task.scoring != scoring and not (task.ready and same_dimensions)
+                or not task.ready and not options.get("diagnostic", False)):
             if progress:
                 progress(index, len(tasks), task.id, "容器验证参考解与负解")
             value = task.model_dump(mode="json")

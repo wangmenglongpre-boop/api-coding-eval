@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from coding_eval.report_views import (
-    COLORS, POPULATIONS, TOKEN_LABELS, number, quality_rows, radar_rows, token_rows,
+    COLORS, POPULATIONS, TOKEN_LABELS, difficulty_rows, number, quality_rows, radar_rows, token_rows,
 )
 
 
@@ -36,7 +36,7 @@ def render_overview(report) -> None:
                           showlegend=False, height=320, margin=dict(t=20, b=20))
     st.plotly_chart(quality, use_container_width=True, key=f"quality-chart-{report.id}")
 
-    st.subheader("质量维度雷达图")
+    st.subheader("质量维度雷达图" if len(report.scoring.dimension_weights) >= 2 else "正确性指标")
     radar = go.Figure()
     data = radar_rows(report)
     for i, row in enumerate(data):
@@ -51,9 +51,24 @@ def render_overview(report) -> None:
                             height=440, margin=dict(t=35, b=35), legend={"orientation": "h"})
         st.plotly_chart(radar, use_container_width=True, key=f"radar-chart-{report.id}")
     else:
-        st.info("暂无完整维度数据可绘制雷达图；缺失维度不补零。")
+        st.info("单一正确性维度使用全通过率和难度矩阵查看成绩。"
+                if len(report.scoring.dimension_weights) < 2
+                else "暂无完整维度数据可绘制雷达图；缺失维度不补零。")
     if len(data) < len(rows):
         st.caption("部分模型维度不完整，待评分覆盖完整后显示；真实 0 分会保留。")
+    difficulty = difficulty_rows(report)
+    if difficulty:
+        st.subheader("简单 / 中等 / 困难 · 原始测试全通过率")
+        figure = go.Figure()
+        for index, model_id in enumerate(report.payload["models"]):
+            values = [r for r in difficulty if r["model_id"] == model_id]
+            figure.add_trace(go.Bar(
+                x=[r["难度"] for r in values], y=[r["value"] for r in values],
+                name=values[0]["模型"], marker_color=COLORS[index % len(COLORS)],
+            ))
+        figure.update_layout(barmode="group", yaxis={"range": [0, 100], "title": "全通过率（%）"},
+                             height=340)
+        st.plotly_chart(figure, use_container_width=True, key=f"difficulty-chart-{report.id}")
 
     st.subheader("各模型平均 Token 对比")
     population = st.radio(
