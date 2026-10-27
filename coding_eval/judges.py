@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Mapping
 from uuid import uuid4
 
+from .check_migrations import migrate_check_source
 from .container_check import (
     JUDGE_VERSION, DockerSandbox, DockerUnavailable, SandboxError,
 )
@@ -150,6 +151,8 @@ def _stage(directory: Path, task: TaskDefinition, files: dict[str, str]) -> None
     ):
         for relative, source in sources.items():
             validate_relative_path(relative)
+            if folder == "tests" and relative == "checks.py":
+                source, _ = migrate_check_source(source)
             path = directory / folder / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(source, encoding="utf-8")
@@ -260,6 +263,16 @@ def _judge_attempt(
         with tempfile.TemporaryDirectory(prefix="coding-eval-") as temporary:
             directory = Path(temporary)
             _stage(directory, task, files)
+            _, migration = migrate_check_source(task.test_files["checks.py"])
+            if migration:
+                effective_path = folder / "effective_checks.py"
+                effective_path.write_text(
+                    (directory / "tests" / "checks.py").read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+                migration_path = folder / "check_migration.json"
+                _write_json(migration_path, migration)
+                artifacts.extend((str(effective_path), str(migration_path)))
             preflight = sandbox.execute(directory, "preflight")
             preflight_log = folder / "preflight.log"
             preflight_log.write_text(preflight.detail + "\n" + preflight.log, encoding="utf-8")

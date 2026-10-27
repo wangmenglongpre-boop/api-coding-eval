@@ -23,7 +23,7 @@ from typing import Any
 from uuid import uuid4
 
 LOG_LIMIT = 64 * 1024
-JUDGE_VERSION = "docker-python-v3"
+JUDGE_VERSION = "docker-python-v4"
 _IMAGE_ID = re.compile(r"sha256:[a-f0-9]{64}\Z")
 _IMAGE = re.compile(
     r"(?:(?:docker\.io/)?library/)?python:3\.11(?:\.\d+)?(?:-slim(?:-bookworm|-trixie)?)?"
